@@ -1,0 +1,11 @@
+{
+  "name": "rdsapp",
+  "version": "1.0.0",
+  "description": "RDSApp with Lambda",
+  "main": "src/app.js",
+  "author": "Robert Oroszi <robert@oroszi.net>",
+  "license": "MIT",
+  "dependencies": {
+    "mysql": "^2.16.0"
+  }
+}

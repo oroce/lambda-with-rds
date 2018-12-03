@@ -1,0 +1,383 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Transform": "AWS::Serverless-2016-10-31",
+    "Description": "lambda-with-rds\n",
+    "Globals": {
+        "Function": {
+            "Timeout": 3
+        }
+    },
+    "Parameters": {
+        "RDSInstanceType": {
+            "Type": "String",
+            "Default": "db.t2.micro"
+        }
+    },
+    "Resources": {
+        "RDSAppFunction": {
+            "Type": "AWS::Serverless::Function",
+            "Properties": {
+                "CodeUri": "src/",
+                "Handler": "app.hello",
+                "Runtime": "nodejs8.10",
+                "Policies": [
+                    {
+                        "VPCAccessPolicy": {}
+                    }
+                ],
+                "Environment": {
+                    "Variables": {
+                        "MYSQL_HOST": {
+                            "Fn::GetAtt": [
+                                "RDSAppRDSCluster",
+                                "Endpoint.Address"
+                            ]
+                        },
+                        "MYSQL_PORT": {
+                            "Fn::GetAtt": [
+                                "RDSAppRDSCluster",
+                                "Endpoint.Port"
+                            ]
+                        },
+                        "MYSQL_DB": "rdsappdb",
+                        "MYSQL_USER": "rdsapp",
+                        "MYSQL_PASSWORD": "rdsapp-with-secret"
+                    }
+                },
+                "Events": {
+                    "HelloWorld": {
+                        "Type": "Api",
+                        "Properties": {
+                            "Path": "/",
+                            "Method": "get"
+                        }
+                    }
+                },
+                "VpcConfig": {
+                    "SecurityGroupIds": [
+                        {
+                            "Fn::GetAtt": "RDSAppSecurityGroup.GroupId"
+                        }
+                    ],
+                    "SubnetIds": [
+                        {
+                            "Ref": "RDSAppSubnetA"
+                        },
+                        {
+                            "Ref": "RDSAppSubnetB"
+                        },
+                        {
+                            "Ref": "RDSAppSubnetC"
+                        }
+                    ]
+                }
+            }
+        },
+        "RDSAppVPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16"
+            }
+        },
+        "RDSAppSubnetA": {
+            "DependsOn": "RDSAppVPC",
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                },
+                "AvailabilityZone": {
+                    "Fn::Sub": "${AWS::Region}a"
+                },
+                "CidrBlock": "10.0.0.0/24"
+            }
+        },
+        "RDSAppSubnetB": {
+            "DependsOn": "RDSAppVPC",
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                },
+                "AvailabilityZone": {
+                    "Fn::Sub": "${AWS::Region}b"
+                },
+                "CidrBlock": "10.0.1.0/24"
+            }
+        },
+        "RDSAppSubnetC": {
+            "DependsOn": "RDSAppVPC",
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                },
+                "AvailabilityZone": {
+                    "Fn::Sub": "${AWS::Region}c"
+                },
+                "CidrBlock": "10.0.2.0/24"
+            }
+        },
+        "RDSAppSecurityGroup": {
+            "DependsOn": "RDSAppVPC",
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "SecurityGroup for Serverless Functions",
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                }
+            }
+        },
+        "RDSAppStorageSecurityGroup": {
+            "DependsOn": "RDSAppVPC",
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "RDS Instanc security group",
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "3306",
+                        "ToPort": "3306",
+                        "SourceSecurityGroupId": {
+                            "Ref": "RDSAppSecurityGroup"
+                        }
+                    }
+                ]
+            }
+        },
+        "RDSAppRDSSubnetGroup": {
+            "Type": "AWS::RDS::DBSubnetGroup",
+            "Properties": {
+                "DBSubnetGroupDescription": "RDS Subnet Group",
+                "SubnetIds": [
+                    {
+                        "Ref": "RDSAppSubnetA"
+                    },
+                    {
+                        "Ref": "RDSAppSubnetB"
+                    },
+                    {
+                        "Ref": "RDSAppSubnetC"
+                    }
+                ]
+            }
+        },
+        "RDSAppRDSCluster": {
+            "DependsOn": "RDSAppStorageSecurityGroup",
+            "Type": "AWS::RDS::DBInstance",
+            "Properties": {
+                "Engine": "MySQL",
+                "DBName": "rdsappdb",
+                "MasterUsername": "rdsapp",
+                "MasterUserPassword": "rdsapp-with-secret",
+                "DBInstanceClass": {
+                    "Ref": "RDSInstanceType"
+                },
+                "EnableCloudwatchLogsExports": [
+                    "audit",
+                    "error",
+                    "general",
+                    "slowquery"
+                ],
+                "AllocatedStorage": 10,
+                "VPCSecurityGroups": [
+                    {
+                        "Fn::GetAtt": "RDSAppStorageSecurityGroup.GroupId"
+                    }
+                ],
+                "DBSubnetGroupName": {
+                    "Ref": "RDSAppRDSSubnetGroup"
+                }
+            }
+        },
+        "InternetGatewayLambda": {
+            "Type": "AWS::EC2::InternetGateway"
+        },
+        "RDSGatewayVPCAttachment": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                },
+                "InternetGatewayId": {
+                    "Ref": "InternetGatewayLambda"
+                }
+            }
+        },
+        "ElasticIpRDSApp1": {
+            "Type": "AWS::EC2::EIP",
+            "Properties": {
+                "Domain": "vpc"
+            }
+        },
+        "ElasticIpRDSApp2": {
+            "Type": "AWS::EC2::EIP",
+            "Properties": {
+                "Domain": "vpc"
+            }
+        },
+        "NatGatewayLambda1": {
+            "DependsOn": "RDSGatewayVPCAttachment",
+            "Type": "AWS::EC2::NatGateway",
+            "Properties": {
+                "AllocationId": {
+                    "Fn::GetAtt": [
+                        "ElasticIpRDSApp1",
+                        "AllocationId"
+                    ]
+                },
+                "SubnetId": {
+                    "Ref": "RDSAppSubnetC"
+                }
+            }
+        },
+        "NatGatewayLambda2": {
+            "DependsOn": "RDSGatewayVPCAttachment",
+            "Type": "AWS::EC2::NatGateway",
+            "Properties": {
+                "AllocationId": {
+                    "Fn::GetAtt": [
+                        "ElasticIpRDSApp2",
+                        "AllocationId"
+                    ]
+                },
+                "SubnetId": {
+                    "Ref": "RDSAppSubnetB"
+                }
+            }
+        },
+        "RouteTableLambdaPublic1": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                }
+            }
+        },
+        "RouteTableLambdaPublic2": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                }
+            }
+        },
+        "RouteTableLambdaPrivate1": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                }
+            }
+        },
+        "RouteTableLambdaPrivate2": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "RDSAppVPC"
+                }
+            }
+        },
+        "RouteLambdaPublic1": {
+            "Type": "AWS::EC2::Route",
+            "DependsOn": "RDSGatewayVPCAttachment",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPublic1"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "InternetGatewayLambda"
+                }
+            }
+        },
+        "RouteLambdaPublic2": {
+            "Type": "AWS::EC2::Route",
+            "DependsOn": "RDSGatewayVPCAttachment",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPublic2"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "InternetGatewayLambda"
+                }
+            }
+        },
+        "RouteLambdaPrivate1": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPrivate1"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "NatGatewayId": {
+                    "Ref": "NatGatewayLambda1"
+                }
+            }
+        },
+        "RouteLambdaPrivate2": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPrivate2"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "NatGatewayId": {
+                    "Ref": "NatGatewayLambda2"
+                }
+            }
+        },
+        "SubnetRouteTableAssociationLambdaPublic1": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "RDSAppSubnetA"
+                },
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPublic1"
+                }
+            }
+        },
+        "SubnetRouteTableAssociationLambdaPublic2": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "RDSAppSubnetB"
+                },
+                "RouteTableId": {
+                    "Ref": "RouteTableLambdaPublic2"
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "RDSAppFunctionApi": {
+            "Description": "API Gateway endpoint URL for Prod stage for the RDSApp function",
+            "Value": {
+                "Fn::Sub": "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+            }
+        },
+        "RDSAppFunction": {
+            "Description": "RDSApp Lambda Function ARN",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSAppFunction",
+                    "Arn"
+                ]
+            }
+        },
+        "RDSAppFunctionIamRole": {
+            "Description": "Implicit IAM Role created for RDSApp function",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSAppFunctionRole",
+                    "Arn"
+                ]
+            }
+        }
+    }
+}
